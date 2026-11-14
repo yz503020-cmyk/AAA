@@ -139,7 +139,7 @@ public partial class MainWindow
         HashSet<string>? r = null;
         await Busy("סורק רכיבים מותקנים (עד דקה)…", () => Task.Run(() => r = Debloat.Scan()));
         _installed = r; _toRemove.Clear();
-        foreach (var it in Debloat.Items.Where(i => i.Recommended && (_installed?.Contains(i.Id) ?? false))) _toRemove.Add(i.Id);
+        foreach (var it in Debloat.Items.Where(i => i.Recommended && (_installed?.Contains(i.Id) ?? false))) _toRemove.Add(it.Id);
         Refresh();
       }, true),
       Btn("הסר את המסומנים", async () =>
