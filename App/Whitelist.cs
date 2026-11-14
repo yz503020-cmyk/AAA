@@ -79,9 +79,14 @@ static class Whitelist
     public List<string> WinExceptions = new();
     public List<string> Deny = new();
     public List<string> Packages = new();
+    public List<string> PfRoots = new();
+    public List<string> PfExceptions = new();
+    public List<AllowedEntry> Publishers = new();
     public bool StrictPackaged;
+    public bool AllowProgramFiles;
     public string WinDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\') + "\\";
     public string WindowsApps = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "WindowsApps") + "\\";
+    readonly Dictionary<string, (DateTime stamp, bool ok)> _sigCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>null = מותר; אחרת סיבת החסימה</summary>
     public string? Check(string path)
@@ -90,25 +95,57 @@ static class Whitelist
       if (path.StartsWith(WinDir, StringComparison.OrdinalIgnoreCase))
         return WinExceptions.Any(e => Match(path, e)) ? "תיקייה ניתנת לכתיבה בתוך Windows" : null;
       if (Allow.Any(a => Match(path, a))) return null;
+      if (Publishers.Count > 0 && PublisherOk(path)) return null;
       if (path.StartsWith(WindowsApps, StringComparison.OrdinalIgnoreCase))
       {
         if (!StrictPackaged) return null;
         var pkg = path[WindowsApps.Length..];
         return Packages.Any(p => pkg.StartsWith(p, StringComparison.OrdinalIgnoreCase)) ? null : "אפליקציית חנות שאינה ברשימה";
       }
+      if (AllowProgramFiles && PfRoots.Any(r => path.StartsWith(r, StringComparison.OrdinalIgnoreCase)))
+        return PfExceptions.Any(e => Match(path, e)) ? "תיקייה פתוחה לכתיבה / תוכנה לא רצויה ב-Program Files" : null;
       return "לא ברשימה הלבנה";
+    }
+
+    /// <summary>קובץ חתום בתוקף, על ידי אותו מפרסם ואותו מוצר כמו אחד ההיתרים לפי חתימה</summary>
+    bool PublisherOk(string path)
+    {
+      DateTime stamp;
+      try { stamp = File.GetLastWriteTimeUtc(path); } catch { return false; }
+      if (_sigCache.TryGetValue(path, out var c) && c.stamp == stamp) return c.ok;
+      bool ok = false;
+      var subj = Signing.SignerSubject(path);
+      if (subj != null)
+      {
+        var prod = Signing.ProductName(path);
+        var match = Publishers.Any(p => p.Signer.Equals(subj, StringComparison.OrdinalIgnoreCase) &&
+                                       (p.Product == "*" || p.Product.Equals(prod, StringComparison.OrdinalIgnoreCase)));
+        ok = match && Signing.IsValid(path);
+      }
+      if (_sigCache.Count > 2000) _sigCache.Clear();
+      _sigCache[path] = (stamp, ok);
+      return ok;
     }
   }
 
   public static Compiled Compile(Config cfg)
   {
-    var c = new Compiled { StrictPackaged = cfg.AppLockerStrictPackaged, Packages = cfg.AllowedPackages.ToList() };
+    var c = new Compiled { StrictPackaged = cfg.AppLockerStrictPackaged, Packages = cfg.AllowedPackages.ToList(), AllowProgramFiles = cfg.AllowProgramFiles };
     foreach (var b in BaselineAllowed) c.Allow.AddRange(ExpandPattern(b));
     foreach (var a in cfg.Allowed)
-      c.Allow.Add(a.IsFolder ? a.Path.TrimEnd('\\') + "\\*" : a.Path);
+    {
+      if (a.IsPublisher) c.Publishers.Add(a);
+      else c.Allow.Add(a.IsFolder ? a.Path.TrimEnd('\\') + "\\*" : a.Path);
+    }
     foreach (var e in WindowsWritableExceptions) c.WinExceptions.AddRange(ExpandPattern(e));
     foreach (var t in DenyTools.Where(t => cfg.DenyTools.Contains(t.Id)))
       foreach (var p in t.Paths) c.Deny.AddRange(ExpandPattern(p));
+    if (cfg.AllowProgramFiles)
+    {
+      c.PfRoots.AddRange(ExpandPattern(@"%PROGRAMFILES%\").Select(r => r.TrimEnd('\\') + "\\"));
+      foreach (var u in ProgramFilesScan.Unwanted) c.PfExceptions.AddRange(ExpandPattern(u));
+      foreach (var w in cfg.PfWritable) c.PfExceptions.Add(w.TrimEnd('\\') + "\\*");
+    }
     return c;
   }
 }

@@ -34,11 +34,20 @@ static class AppLocker
        $"<Conditions><FilePublisherCondition PublisherName=\"{X(publisher)}\" ProductName=\"{X(product)}\" BinaryName=\"*\">" +
        "<BinaryVersionRange LowSection=\"0.0.0.0\" HighSection=\"*\" /></FilePublisherCondition></Conditions></FilePublisherRule>";
 
+  static string ExePublisherRule(string name, string sid, string publisher, string product)
+    => $"<FilePublisherRule Id=\"{Guid.NewGuid()}\" Name=\"{X(name)}\" Description=\"AAA\" UserOrGroupSid=\"{sid}\" Action=\"Allow\">" +
+       $"<Conditions><FilePublisherCondition PublisherName=\"{X(publisher)}\" ProductName=\"{X(product)}\" BinaryName=\"*\">" +
+       "<BinaryVersionRange LowSection=\"*\" HighSection=\"*\" /></FilePublisherCondition></Conditions></FilePublisherRule>";
+
+  /// <summary>חריגים מהיתר Program Files: תוכנות לא רצויות + תיקיות שמשתמש רגיל יכול לכתוב אליהן</summary>
+  static IEnumerable<string> PfExceptions(Config cfg) =>
+    ProgramFilesScan.Unwanted.Concat(cfg.PfWritable.Select(w => w.TrimEnd('\\') + "\\*")).Distinct(StringComparer.OrdinalIgnoreCase);
+
   public static string BuildXml(Config cfg)
   {
     string mode = cfg.AppLockerAuditOnly ? "AuditOnly" : "Enabled";
     var allowPaths = Whitelist.BaselineAllowed
-      .Concat(cfg.Allowed.Select(a => a.IsFolder ? a.Path.TrimEnd('\\') + "\\*" : a.Path))
+      .Concat(cfg.Allowed.Where(a => !a.IsPublisher).Select(a => a.IsFolder ? a.Path.TrimEnd('\\') + "\\*" : a.Path))
       .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     var targets = cfg.TargetSids.ToList();
     var deny = Whitelist.DenyTools.Where(t => cfg.DenyTools.Contains(t.Id)).SelectMany(t => t.Paths).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -51,6 +60,9 @@ static class AppLocker
     sb.Append(PathRule("AAA: מנהלים – הכל", Admins, "Allow", "*"));
     sb.Append(PathRule("AAA: תיקיית Windows", Everyone, "Allow", "%WINDIR%\\*", Whitelist.WindowsWritableExceptions));
     foreach (var p in allowPaths) sb.Append(PathRule("AAA: " + p, Everyone, "Allow", p));
+    if (cfg.AllowProgramFiles) sb.Append(PathRule("AAA: Program Files (מצב רגיל)", Everyone, "Allow", "%PROGRAMFILES%\\*", PfExceptions(cfg)));
+    foreach (var a in cfg.Allowed.Where(a => a.IsPublisher))
+      sb.Append(ExePublisherRule("AAA: " + a.Product + " (" + Path.GetFileName(a.Path) + ")", Everyone, a.Publisher, a.Product));
     foreach (var sid in targets)
       foreach (var p in deny) sb.Append(PathRule("AAA חסום: " + p, sid, "Deny", p));
     sb.Append("</RuleCollection>");
@@ -66,6 +78,7 @@ static class AppLocker
     sb.Append(PathRule("AAA: מנהלים – סקריפטים", Admins, "Allow", "*"));
     sb.Append(PathRule("AAA: סקריפטים של Windows", Everyone, "Allow", "%WINDIR%\\*", Whitelist.WindowsWritableExceptions));
     foreach (var p in allowPaths) sb.Append(PathRule("AAA: " + p, Everyone, "Allow", p));
+    if (cfg.AllowProgramFiles) sb.Append(PathRule("AAA: סקריפטים ב-Program Files", Everyone, "Allow", "%PROGRAMFILES%\\*", PfExceptions(cfg)));
     sb.Append("</RuleCollection>");
 
     // ---- אפליקציות חנות ----

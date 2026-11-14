@@ -25,9 +25,10 @@ static class Program
     app.DispatcherUnhandledException += (s, e) =>
     {
       Log.Write("UI exception: " + e.Exception);
-      MessageBox.Show("שגיאה: " + e.Exception.Message, "AAA", MessageBoxButton.OK, MessageBoxImage.Error);
+      Dialogs.Say("שגיאה: " + e.Exception.Message, warn: true);
       e.Handled = true;
     };
+    Theme.Apply(app);
     AppPaths.EnsureRoot();
     return app.Run(new MainWindow());
   }

@@ -5,38 +5,40 @@ using System.Windows.Media;
 
 namespace AAA;
 
-/// <summary>החלון הראשי. כל השינויים נשמרים בזיכרון עד "החל שינויים" (חוץ מפעולות מיידיות שמסומנות כך)</summary>
+/// <summary>החלון הראשי – באותו מבנה ועיצוב כמו HGEC: סרגל עליון, תפריט צד עם סמלים, כרטיסים מעוגלים, מתגים.</summary>
 public partial class MainWindow : Window
 {
   internal Config Cfg;
   internal List<LocalUser> UsersList = new();
-  readonly ContentControl _content = new();
-  readonly TextBlock _status = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 12, 0) };
+  readonly ContentControl _host = new();
+  readonly TextBlock _status = new() { FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
   readonly Button _apply;
-  readonly ListBox _nav = new();
   bool _dirty;
   bool _busy;
+  int _sel;
+  string _glyph = "";
 
-  static readonly Brush Bg = Hex("#F4F6FA");
-  static readonly Brush NavBg = Hex("#1E2A44");
-  static readonly Brush Accent = Hex("#2D6CDF");
-  static readonly Brush Muted = Hex("#5B6475");
-  static readonly Brush Warn = Hex("#B3261E");
-  static readonly Brush Good = Hex("#1B7F3B");
+  static readonly Brush Ink = Rgb(30, 41, 59);
+  static readonly Brush Muted = Rgb(100, 116, 139);
+  static readonly Brush Warn = Rgb(185, 28, 28);
+  static readonly Brush Good = Rgb(21, 128, 61);
+  static readonly Brush Line = Rgb(229, 231, 235);
 
-  static Brush Hex(string h) { var b = (SolidColorBrush)new BrushConverter().ConvertFromString(h)!; b.Freeze(); return b; }
+  static Brush Rgb(byte r, byte g, byte b) { var x = new SolidColorBrush(Color.FromRgb(r, g, b)); x.Freeze(); return x; }
 
-  record PageDef(string Title, Func<UIElement> Build);
+  record PageDef(string Title, string Glyph, Func<UIElement> Build);
   readonly List<PageDef> _pages;
+  readonly List<Action> _paints = new();
 
   public MainWindow()
   {
     Title = "AAA – נעילת מחשב לפי רשימה לבנה";
-    Width = 1150; Height = 780; MinWidth = 900; MinHeight = 600;
+    Width = 1100; Height = 760; MinWidth = 880; MinHeight = 560;
     FlowDirection = FlowDirection.RightToLeft;
-    FontFamily = new FontFamily("Segoe UI");
     FontSize = 14;
-    Background = Bg;
+    Background = new SolidColorBrush(Color.FromRgb(248, 250, 252));
+    FontFamily = new FontFamily("Segoe UI");
+    Foreground = Ink;
     WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
     Cfg = Config.Load();
@@ -44,64 +46,106 @@ public partial class MainWindow : Window
 
     _pages = new()
     {
-      new("1. חשבונות יעד", PageUsers),
-      new("2. מדיניות (GPO)", PagePolicies),
-      new("3. ביוס ו-WinRE", PageRecovery),
-      new("4. ניקוי Windows", PageDebloat),
-      new("5. תוכנות מורשות", PageApps),
-      new("6. רשימה לבנה", PageWhitelist),
-      new("7. יומן חסימות", PageLog),
-      new("ביטול הכל", PageRemoveAll),
+      new("חשבונות יעד", "", PageUsers),
+      new("מדיניות GPO", "", PagePolicies),
+      new("ביוס ו-WinRE", "", PageRecovery),
+      new("ניקוי Windows", "", PageDebloat),
+      new("תוכנות מורשות", "", PageApps),
+      new("רשימה לבנה", "", PageWhitelist),
+      new("יומן חסימות", "", PageLog),
+      new("ביטול הכל", "", PageRemoveAll),
     };
 
-    // ----- ניווט -----
-    _nav.Background = NavBg; _nav.BorderThickness = new Thickness(0); _nav.Width = 210;
-    _nav.Foreground = Brushes.White; _nav.FontSize = 15;
-    foreach (var p in _pages)
-      _nav.Items.Add(new ListBoxItem { Content = p.Title, Padding = new Thickness(14, 10, 14, 10), Foreground = Brushes.White });
-    _nav.SelectionChanged += (_, _) => ShowPage();
+    // ----- סרגל עליון -----
+    _apply = Soft("החל שינויים", "", async () => await ApplyAll());
+    Theme.Tipped(_apply, "מחיל על המחשב את כל החסימות וההגדרות שבחרת. יש ללחוץ עליו אחרי שינוי.");
+    var top = new StackPanel { Orientation = Orientation.Horizontal, Background = Brushes.White };
+    top.Children.Add(_apply);
+    top.Children.Add(_status);
+    foreach (FrameworkElement ch in top.Children) { ch.Margin = new Thickness(8, 10, 0, 10); ch.VerticalAlignment = VerticalAlignment.Center; }
+    var topBar = new Border { Child = top, Background = Brushes.White, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 0, 1) };
 
-    var header = new StackPanel { Background = NavBg };
-    header.Children.Add(new TextBlock { Text = "AAA", FontSize = 30, FontWeight = FontWeights.Bold, Foreground = Brushes.White, Margin = new Thickness(14, 14, 14, 0) });
-    header.Children.Add(new TextBlock { Text = "נעילת מחשב לפי רשימה לבנה", Foreground = Hex("#AFC3E8"), Margin = new Thickness(14, 0, 14, 12), TextWrapping = TextWrapping.Wrap });
-    var navPanel = new DockPanel { Background = NavBg };
-    DockPanel.SetDock(header, Dock.Top);
-    navPanel.Children.Add(header);
-    navPanel.Children.Add(_nav);
+    // ----- תפריט צד -----
+    var side = new Border { Width = 92, Background = Brushes.White, BorderBrush = Line, BorderThickness = new Thickness(0, 0, 1, 0) };
+    var sideSp = new StackPanel();
+    side.Child = new ScrollViewer { Content = sideSp, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    var logoImg = new Image { Source = Logo.Src, Width = 54, Height = 54, Margin = new Thickness(0, 18, 0, 16), HorizontalAlignment = HorizontalAlignment.Center };
+    RenderOptions.SetBitmapScalingMode(logoImg, BitmapScalingMode.HighQuality);
+    sideSp.Children.Add(logoImg);
+    var mute = Rgb(107, 114, 128);
+    var selBg = Rgb(239, 246, 255);
+    var hoverBg = Rgb(243, 244, 246);
+    for (int i = 0; i < _pages.Count; i++)
+    {
+      int k = i;
+      var p = _pages[i];
+      var ic = Theme.Glyph(p.Glyph, 20, mute);
+      var tx = new TextBlock { Text = p.Title, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = mute, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 6, 0, 0) };
+      var col = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+      col.Children.Add(ic); col.Children.Add(tx);
+      var item = new Border { CornerRadius = new CornerRadius(12), Padding = new Thickness(4, 10, 4, 10), Margin = new Thickness(8, 2, 8, 2), Background = Brushes.Transparent, Child = col };
+      var bar = new Border { Width = 3, CornerRadius = new CornerRadius(2), Background = Theme.SideAccent, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 14, 0, 14), Visibility = Visibility.Collapsed };
+      var cell = new Grid { Background = Brushes.Transparent, Cursor = System.Windows.Input.Cursors.Hand };
+      cell.Children.Add(item); cell.Children.Add(bar);
+      void Paint()
+      {
+        bool sel = _sel == k;
+        item.Background = sel ? selBg : Brushes.Transparent;
+        ic.Foreground = tx.Foreground = sel ? Theme.SideAccent : mute;
+        bar.Visibility = sel ? Visibility.Visible : Visibility.Collapsed;
+      }
+      _paints.Add(Paint);
+      cell.MouseEnter += (_, _) => { if (_sel != k) item.Background = hoverBg; };
+      cell.MouseLeave += (_, _) => Paint();
+      cell.MouseLeftButtonUp += (_, _) => Select(k);
+      sideSp.Children.Add(cell);
+    }
 
-    // ----- סרגל תחתון -----
-    _apply = new Button { Content = "החל שינויים", Padding = new Thickness(22, 8, 22, 8), Margin = new Thickness(10), Background = Accent, Foreground = Brushes.White, FontWeight = FontWeights.SemiBold, BorderThickness = new Thickness(0) };
-    _apply.Click += async (_, _) => await ApplyAll();
-    var bottom = new DockPanel { Background = Brushes.White };
-    DockPanel.SetDock(_apply, Dock.Right);
-    bottom.Children.Add(_apply);
-    bottom.Children.Add(_status);
+    var foot = new TextBlock
+    {
+      Text = "האחריות על המשתמש בלבד, בעז\"ה שישמש לדברים חיוביים.", FontSize = 12, Foreground = Rgb(148, 163, 184),
+      HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 7, 0, 9),
+    };
 
-    var main = new DockPanel();
-    DockPanel.SetDock(navPanel, Dock.Left);
-    DockPanel.SetDock(bottom, Dock.Bottom);
-    main.Children.Add(navPanel);
-    main.Children.Add(bottom);
-    main.Children.Add(new ScrollViewer { Content = _content, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(22, 16, 22, 16) });
-    Content = main;
+    var root = new DockPanel();
+    DockPanel.SetDock(foot, Dock.Bottom);
+    DockPanel.SetDock(topBar, Dock.Top);
+    DockPanel.SetDock(side, Dock.Left); // ב-RTL: מופיע מימין
+    root.Children.Add(foot);
+    root.Children.Add(topBar);
+    root.Children.Add(side);
+    root.Children.Add(_host);
+    Content = root;
 
-    _nav.SelectedIndex = Cfg.TargetSids.Count == 0 ? 0 : 1;
+    Select(Cfg.TargetSids.Count == 0 ? 0 : 1);
     SetStatus(null);
     Closing += (_, e) =>
     {
-      if (_dirty && MessageBox.Show("יש שינויים שלא הוחלו. לצאת בלי להחיל?", "AAA", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        e.Cancel = true;
+      if (_busy) { e.Cancel = true; Dialogs.Say("פעולה עדיין מתבצעת. המתן שתסתיים ואז סגור את החלון."); return; }
+      if (_dirty && !Dialogs.Say("יש שינויים שלא הוחלו. לצאת בלי להחיל?", yesNo: true, warn: true)) e.Cancel = true;
     };
   }
 
-  void ShowPage()
+  void Select(int k)
   {
-    if (_nav.SelectedIndex < 0) return;
-    try { _content.Content = _pages[_nav.SelectedIndex].Build(); }
-    catch (Exception ex) { _content.Content = Para("שגיאה בטעינת הדף: " + ex.Message, Warn); Log.Write("Page: " + ex); }
+    _sel = k;
+    foreach (var p in _paints) p();
+    Refresh();
   }
 
-  internal void Refresh() => ShowPage();
+  internal void Refresh()
+  {
+    var p = _pages[_sel];
+    _glyph = p.Glyph;
+    UIElement body;
+    try { body = p.Build(); }
+    catch (Exception ex) { body = Para("שגיאה בטעינת הדף: " + ex.Message, Warn); Log.Write("Page: " + ex); }
+    double off = (_host.Content as ScrollViewer)?.VerticalOffset ?? 0;
+    var sv = new ScrollViewer { Content = body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+    if (body is FrameworkElement fe) fe.Margin = new Thickness(28, 22, 28, 22);
+    _host.Content = sv;
+    if (off > 0) sv.Loaded += (_, _) => sv.ScrollToVerticalOffset(off);
+  }
 
   internal void MarkDirty() { _dirty = true; SetStatus(null); }
 
@@ -109,17 +153,34 @@ public partial class MainWindow : Window
   {
     if (text != null) { _status.Text = text; _status.Foreground = Muted; return; }
     var targets = Cfg.TargetSids.Select(s => UsersList.FirstOrDefault(u => u.Sid == s)?.Name ?? s);
-    _status.Text = (_dirty ? "● יש שינויים שלא הוחלו.  " : "") +
+    _status.Text = (_dirty ? "● יש שינויים שלא הוחלו – לחץ \"החל שינויים\".   " : "") +
       (Cfg.TargetSids.Count == 0 ? "לא נבחר חשבון יעד" : "חשבונות יעד: " + string.Join(", ", targets));
     _status.Foreground = _dirty ? Warn : Muted;
   }
 
-  // ===================== עזרי ממשק =====================
+  // ===================== עזרי ממשק (כמו ב-HGEC) =====================
 
-  internal static TextBlock H1(string t) => new() { Text = t, FontSize = 24, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 0, 0, 6) };
-  internal static TextBlock H2(string t) => new() { Text = t, FontSize = 17, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 4, 0, 6) };
+  /// <summary>כותרת הדף עם סמל בתוך ריבוע מעוגל</summary>
+  internal UIElement H1(string t)
+  {
+    var h = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 14) };
+    h.Children.Add(Theme.Badge(_glyph));
+    h.Children.Add(new TextBlock { Text = t, FontSize = 22, FontWeight = FontWeights.SemiBold, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center });
+    return h;
+  }
+
+  internal static UIElement H2(string t, string? glyph = null)
+  {
+    var tb = new TextBlock { Text = t, FontSize = 16, FontWeight = FontWeights.SemiBold, Foreground = Ink, VerticalAlignment = VerticalAlignment.Center };
+    if (glyph == null) { tb.Margin = new Thickness(0, 0, 0, 8); return tb; }
+    var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+    var g = Theme.Glyph(glyph, 16, Theme.Accent); g.Margin = new Thickness(0, 0, 8, 0);
+    sp.Children.Add(g); sp.Children.Add(tb);
+    return sp;
+  }
+
   internal static TextBlock Para(string t, Brush? color = null, double size = 14) =>
-    new() { Text = t, TextWrapping = TextWrapping.Wrap, Foreground = color ?? Brushes.Black, FontSize = size, Margin = new Thickness(0, 0, 0, 6) };
+    new() { Text = t, TextWrapping = TextWrapping.Wrap, Foreground = color ?? Ink, FontSize = size, Margin = new Thickness(0, 0, 0, 8), LineHeight = size * 1.45 };
   internal static TextBlock Small(string t, Brush? color = null) => Para(t, color ?? Muted, 12.5);
 
   internal static Border Card(params UIElement[] children)
@@ -128,15 +189,33 @@ public partial class MainWindow : Window
     foreach (var c in children) sp.Children.Add(c);
     return new Border
     {
-      Background = Brushes.White, CornerRadius = new CornerRadius(8), Padding = new Thickness(16, 12, 16, 12),
-      Margin = new Thickness(0, 0, 0, 12), BorderBrush = Hex("#DDE3EC"), BorderThickness = new Thickness(1), Child = sp,
+      Child = sp, Background = Brushes.White, CornerRadius = new CornerRadius(14), Padding = new Thickness(16, 12, 16, 12),
+      Margin = new Thickness(0, 0, 0, 12), BorderBrush = new SolidColorBrush(Color.FromRgb(230, 235, 242)), BorderThickness = new Thickness(1),
+      Effect = new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 16, ShadowDepth = 2, Opacity = 0.05, Color = Color.FromRgb(30, 41, 59) },
     };
   }
 
-  internal static Button Btn(string text, Action onClick, bool primary = false)
+  /// <summary>כפתור: primary = כחול מלא; אחרת – הסגנון העדין של HGEC (רקע תכלת, מסגרת דקה)</summary>
+  internal static Button Btn(string text, Action onClick, bool primary = false, string? glyph = null)
   {
-    var b = new Button { Content = text, Padding = new Thickness(14, 5, 14, 5), Margin = new Thickness(0, 4, 8, 4), HorizontalAlignment = HorizontalAlignment.Left };
-    if (primary) { b.Background = Accent; b.Foreground = Brushes.White; b.BorderThickness = new Thickness(0); }
+    glyph ??= text.Contains("הוסף") || text.Contains("התר") ? "" : text.Contains("הסר") ? "" : text.Contains("סרוק") || text.Contains("חפש") ? "" : text.Contains("רענן") ? "" : null;
+    Button b;
+    if (primary)
+    {
+      b = new Button { Content = glyph == null ? text : Theme.IconText(glyph, text), HorizontalAlignment = HorizontalAlignment.Left };
+      b.Click += (_, _) => onClick();
+    }
+    else b = Soft(text, glyph, onClick);
+    b.Margin = new Thickness(0, 4, 8, 4);
+    return b;
+  }
+
+  internal static Button Soft(string text, string? glyph, Action onClick)
+  {
+    var fg = Color.FromRgb(52, 90, 158);
+    var b = new Button { Style = Theme.Soft(typeof(Button)), HorizontalAlignment = HorizontalAlignment.Left };
+    Theme.Tint(b, Color.FromRgb(238, 243, 252), fg, Color.FromRgb(206, 220, 242));
+    b.Content = glyph == null ? new TextBlock { Text = text, Foreground = new SolidColorBrush(fg) } : Theme.IconText(glyph, text, new SolidColorBrush(fg));
     b.Click += (_, _) => onClick();
     return b;
   }
@@ -148,28 +227,49 @@ public partial class MainWindow : Window
     return sp;
   }
 
-  internal CheckBox Check(string text, bool isChecked, Action<bool> onChange, bool enabled = true, bool dirty = true)
+  /// <summary>מתג הפעלה/כיבוי (CheckBox בסגנון מתג של HGEC)</summary>
+  internal CheckBox Check(string text, bool isChecked, Action<bool> onChange, bool enabled = true, bool dirty = true, string? tip = null)
   {
-    var cb = new CheckBox { Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap }, IsChecked = isChecked, IsEnabled = enabled, Margin = new Thickness(0, 4, 0, 2), VerticalContentAlignment = VerticalAlignment.Center };
+    var cb = new CheckBox
+    {
+      Content = new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, MaxWidth = 700 },
+      IsChecked = isChecked, IsEnabled = enabled, Margin = new Thickness(0, 6, 0, 2), Opacity = enabled ? 1 : 0.55,
+    };
     cb.Checked += (_, _) => { onChange(true); if (dirty) MarkDirty(); };
     cb.Unchecked += (_, _) => { onChange(false); if (dirty) MarkDirty(); };
+    if (tip != null) Theme.Tipped(cb, tip);
     return cb;
   }
+
+  /// <summary>מתג + שורת הסבר מתחתיו</summary>
+  internal UIElement Toggle(string text, string? desc, bool isChecked, Action<bool> onChange, bool enabled = true, bool dirty = true, string? warn = null)
+  {
+    var sp = new StackPanel { Margin = new Thickness(0, 0, 0, 6) };
+    sp.Children.Add(Check(text, isChecked, onChange, enabled, dirty));
+    if (!string.IsNullOrEmpty(desc)) { var d = Small(desc); d.Margin = new Thickness(52, 0, 0, 2); sp.Children.Add(d); }
+    if (warn != null) { var w = Small("⚠ " + warn, Warn); w.Margin = new Thickness(52, 0, 0, 2); sp.Children.Add(w); }
+    return sp;
+  }
+
+  internal static TextBox Code(string text) => new()
+  {
+    Text = text, IsReadOnly = true, FlowDirection = FlowDirection.LeftToRight, FontFamily = new FontFamily("Consolas"), Margin = new Thickness(0, 2, 0, 8),
+  };
 
   /// <summary>מריץ פעולה ארוכה ברקע ומציג סטטוס</summary>
   internal async Task Busy(string what, Func<Task> work)
   {
-    if (_busy) { MessageBox.Show("פעולה אחרת עדיין רצה.", "AAA"); return; }
+    if (_busy) { Dialogs.Say("פעולה אחרת עדיין רצה."); return; }
     _busy = true; _apply.IsEnabled = false;
     SetStatus("⏳ " + what);
     System.Windows.Input.Mouse.OverrideCursor = System.Windows.Input.Cursors.Wait;
     try { await work(); }
-    catch (Exception ex) { Log.Write(what + ": " + ex); MessageBox.Show("שגיאה: " + ex.Message, "AAA", MessageBoxButton.OK, MessageBoxImage.Error); }
+    catch (Exception ex) { Log.Write(what + ": " + ex); Dialogs.Say("שגיאה: " + ex.Message, warn: true); }
     finally { System.Windows.Input.Mouse.OverrideCursor = null; _busy = false; _apply.IsEnabled = true; SetStatus(null); }
   }
 
-  internal static bool Confirm(string text) =>
-    MessageBox.Show(text, "AAA", MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+  internal static bool Confirm(string text) => Dialogs.Say(text, yesNo: true, warn: true);
+  internal static void Say(string text) => Dialogs.Say(text);
 
   /// <summary>שומר מיד דגלים של פעולות מיידיות, בלי להחיל את שאר השינויים שבהמתנה</summary>
   internal void SaveImmediateFlags(Action<Config> set)
@@ -187,14 +287,20 @@ public partial class MainWindow : Window
     if (Cfg.TargetSids.Count == 0 && (Cfg.Policies.Any(id => PolicyCatalog.All.FirstOrDefault(p => p.Id == id)?.UserScoped == true) || Cfg.WatchdogEnabled || Cfg.DenyTools.Count > 0))
       if (!Confirm("לא נבחר חשבון יעד: חסימות המשתמש, הוואצ'דוג והכלים החסומים לא יחולו על אף אחד. להמשיך?")) return;
     if (Cfg.TargetSids.Contains(Users.CurrentSid()))
-    { MessageBox.Show("החשבון שאתה מחובר אליו כעת מסומן כחשבון יעד. הסר אותו ברשימת חשבונות היעד.", "AAA"); return; }
-    if (Cfg.AppLockerEnabled && !Cfg.AppLockerAuditOnly && Cfg.Allowed.Count == 0)
+    { Say("החשבון שאתה מחובר אליו כעת מסומן כחשבון יעד. הסר אותו ברשימת חשבונות היעד."); return; }
+    if (Cfg.AppLockerEnabled && !Cfg.AppLockerAuditOnly && !Cfg.AllowProgramFiles && Cfg.Allowed.Count == 0)
       if (!Confirm("AppLocker במצב אכיפה בלי שום תוכנה מורשית: משתמש היעד יוכל להריץ רק את Windows עצמו. להמשיך?")) return;
 
     var msgs = new List<string>();
     await Busy("מחיל שינויים…", () => Task.Run(() =>
     {
       msgs.AddRange(PolicyEngine.Apply(Cfg, UsersList));
+      if (Cfg.AllowProgramFiles && (Cfg.AppLockerEnabled || Cfg.WatchdogEnabled))
+      {
+        Dispatcher.Invoke(() => SetStatus("⏳ סורק תיקיות ב-Program Files שמשתמש רגיל יכול לכתוב אליהן…"));
+        Cfg.PfWritable = ProgramFilesScan.FindWritable(Cfg.TargetSids);
+        if (Cfg.PfWritable.Count > 0) msgs.Add($"נמצאו {Cfg.PfWritable.Count} תיקיות פתוחות לכתיבה ב-Program Files – הן הוחרגו מההיתר.");
+      }
       if (Cfg.AppLockerEnabled) msgs.Add(AppLocker.Apply(Cfg).msg);
       else if (Cfg.AppLockerApplied) msgs.Add(AppLocker.Clear(Cfg).msg);
       Cfg.Save();
@@ -205,6 +311,6 @@ public partial class MainWindow : Window
     _dirty = false;
     SetStatus(null);
     Refresh();
-    MessageBox.Show("השינויים הוחלו.\n\n" + string.Join("\n", msgs.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => "• " + m)), "AAA", MessageBoxButton.OK, MessageBoxImage.Information);
+    Say("השינויים הוחלו.\n\n" + string.Join("\n", msgs.Where(m => !string.IsNullOrWhiteSpace(m)).Select(m => "• " + m)));
   }
 }

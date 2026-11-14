@@ -112,6 +112,12 @@ public class AllowedEntry
   public bool IsFolder { get; set; }
   /// <summary>מאיזה פרופיל תוכנה הגיע (או "ידני")</summary>
   public string Source { get; set; } = "ידני";
+  /// <summary>היתר לפי חתימה דיגיטלית (לקבצים בתיקיות שהמשתמש יכול לכתוב אליהן). ריק = היתר לפי נתיב</summary>
+  public string Publisher { get; set; } = "";
+  public string Product { get; set; } = "";
+  /// <summary>נושא התעודה (לבדיקת הוואצ'דוג)</summary>
+  public string Signer { get; set; } = "";
+  [JsonIgnore] public bool IsPublisher => Publisher.Length > 0;
 }
 
 public class Config
@@ -123,6 +129,11 @@ public class Config
   /// <summary>גיבוי ערכי הרישום שלפני השינוי, כדי שביטול יחזיר בדיוק את המצב הקודם</summary>
   public Dictionary<string, BackupEntry> Backups { get; set; } = new();
   public List<AllowedEntry> Allowed { get; set; } = new();
+
+  /// <summary>מצב "רגיל": כל Program Files מותר (חוץ מתיקיות פתוחות לכתיבה ותוכנות לא רצויות). ברירת מחדל: מחמיר</summary>
+  public bool AllowProgramFiles { get; set; }
+  /// <summary>תוצאת הסריקה האחרונה: תיקיות ב-Program Files שמשתמש רגיל יכול לכתוב אליהן</summary>
+  public List<string> PfWritable { get; set; } = new();
 
   public bool AppLockerEnabled { get; set; }
   public bool AppLockerAuditOnly { get; set; } = true;
