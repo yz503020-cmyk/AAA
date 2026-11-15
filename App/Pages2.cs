@@ -54,7 +54,7 @@ public partial class MainWindow
     alsp.Children.Add(Dialogs.Segment(new[] { "מצב בדיקה בלבד (רק נרשם ביומן)", "מצב אכיפה (חוסם)" }, Cfg.AppLockerAuditOnly ? 0 : 1,
       k => { Cfg.AppLockerAuditOnly = k == 0; MarkDirty(); }));
     alsp.Children.Add(Toggle("הגבל גם אפליקציות חנות", "רק רכיבי Windows + החבילות שבלשונית \"תוכנות מורשות\" (ברירת מחדל: תמונות).", Cfg.AppLockerStrictPackaged, on => Cfg.AppLockerStrictPackaged = on));
-    alsp.Children.Add(Small("הכללים: מנהלים שאינם חשבון יעד – הכל (לפי החשבון האישי, גם בלי "הפעל כמנהל"). כולם – תיקיית Windows (בלי התיקיות הפתוחות לכתיבה), תיקיות מאושרות, היתרים לפי חתימה" + (Cfg.AllowProgramFiles ? ", Program Files (עם חריגים)" : "") + ". קובצי התקנה (MSI) – רק מנהלים. סקריפטים (bat, ps1, vbs, js) – רק מתוך המקומות המותרים. DLL – לא נבדקים."));
+    alsp.Children.Add(Small("הכללים: מנהלים שאינם חשבון יעד – הכל (לפי החשבון האישי, גם בלי \"הפעל כמנהל\"). כולם – תיקיית Windows (בלי התיקיות הפתוחות לכתיבה), תיקיות מאושרות, היתרים לפי חתימה" + (Cfg.AllowProgramFiles ? ", Program Files (עם חריגים)" : "") + ". קובצי התקנה (MSI) – רק מנהלים. סקריפטים (bat, ps1, vbs, js) – רק מתוך המקומות המותרים. DLL – לא נבדקים."));
     alsp.Children.Add(Btn("הצג את קובץ הכללים שייווצר", () =>
     {
       var w = new Window { Title = "AppLocker XML", Width = 900, Height = 600, Owner = this, FlowDirection = FlowDirection.LeftToRight };
