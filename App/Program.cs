@@ -21,6 +21,9 @@ static class Program
       return 0;
     }
 
+    // התקנה עצמית ל-Program Files\AAA (תמיד מותרת) והפעלה משם
+    if (Install.EnsureInstalledAndRelaunch(args)) return 0;
+
     var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
     app.DispatcherUnhandledException += (s, e) =>
     {

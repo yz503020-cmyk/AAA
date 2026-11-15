@@ -54,7 +54,7 @@ public partial class MainWindow
     alsp.Children.Add(Dialogs.Segment(new[] { "מצב בדיקה בלבד (רק נרשם ביומן)", "מצב אכיפה (חוסם)" }, Cfg.AppLockerAuditOnly ? 0 : 1,
       k => { Cfg.AppLockerAuditOnly = k == 0; MarkDirty(); }));
     alsp.Children.Add(Toggle("הגבל גם אפליקציות חנות", "רק רכיבי Windows + החבילות שבלשונית \"תוכנות מורשות\" (ברירת מחדל: תמונות).", Cfg.AppLockerStrictPackaged, on => Cfg.AppLockerStrictPackaged = on));
-    alsp.Children.Add(Small("הכללים: מנהלים – הכל. כולם – תיקיית Windows (בלי התיקיות הפתוחות לכתיבה), תיקיות מאושרות, היתרים לפי חתימה" + (Cfg.AllowProgramFiles ? ", Program Files (עם חריגים)" : "") + ". קובצי התקנה (MSI) – רק מנהלים. סקריפטים (bat, ps1, vbs, js) – רק מתוך המקומות המותרים. DLL – לא נבדקים."));
+    alsp.Children.Add(Small("הכללים: מנהלים שאינם חשבון יעד – הכל (לפי החשבון האישי, גם בלי "הפעל כמנהל"). כולם – תיקיית Windows (בלי התיקיות הפתוחות לכתיבה), תיקיות מאושרות, היתרים לפי חתימה" + (Cfg.AllowProgramFiles ? ", Program Files (עם חריגים)" : "") + ". קובצי התקנה (MSI) – רק מנהלים. סקריפטים (bat, ps1, vbs, js) – רק מתוך המקומות המותרים. DLL – לא נבדקים."));
     alsp.Children.Add(Btn("הצג את קובץ הכללים שייווצר", () =>
     {
       var w = new Window { Title = "AppLocker XML", Width = 900, Height = 600, Owner = this, FlowDirection = FlowDirection.LeftToRight };
@@ -169,6 +169,22 @@ public partial class MainWindow
           var res = Recovery.EnableWinRe(Cfg); Cfg.Save(); Say(res.msg);
         }
       }, true, "")));
+    sp.Children.Add(Card(H2("עדכון גרסה", "\uE895"),
+      Small($"התוכנה מותקנת ב-{Install.Dir} ותמיד מותרת שם. כשחשבון מנהל חסום, קובץ חדש שהורדת לא ירוץ מ\"הורדות\" – לכן מעדכנים מכאן: בחר את AAA.exe החדש, והוא יחליף את המותקן ויופעל מחדש."),
+      Btn("עדכן מקובץ…", () =>
+      {
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = "בחר את AAA.exe החדש", Filter = "AAA.exe|AAA.exe|תוכנות (*.exe)|*.exe" };
+        if (dlg.ShowDialog(this) != true) return;
+        if (!Confirm("להחליף את התוכנה בגרסה שנבחרה ולהפעיל אותה מחדש?")) return;
+        try
+        {
+          var err = Install.UpdateFrom(dlg.FileName);
+          if (err.Length > 0) { Say(err); return; }
+          _dirty = false;
+          Application.Current.Shutdown();
+        }
+        catch (Exception ex) { Say("העדכון נכשל: " + ex.Message); }
+      }, glyph: "\uE896")));
     sp.Children.Add(Card(H2("קבצים", ""),
       Small("ההגדרות, היומנים וקובץ הכללים נמצאים ב:"),
       Code(AppPaths.Root)));

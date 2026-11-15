@@ -169,7 +169,7 @@ static class PolicyEngine
     foreach (var sid in sids)
     {
       var u = users.FirstOrDefault(x => x.Sid.Equals(sid, StringComparison.OrdinalIgnoreCase));
-      bool isTarget = cfg.TargetSids.Contains(sid, StringComparer.OrdinalIgnoreCase) && u is { IsAdmin: false };
+      bool isTarget = cfg.TargetSids.Contains(sid, StringComparer.OrdinalIgnoreCase) && u != null;
       using var hive = UserHive.Open(sid, u?.ProfilePath ?? "");
       if (hive == null)
       {

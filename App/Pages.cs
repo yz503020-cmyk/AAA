@@ -11,21 +11,24 @@ public partial class MainWindow
   {
     var sp = new StackPanel();
     sp.Children.Add(H1("חשבונות יעד"));
-    sp.Children.Add(Para("בחר את החשבונות שעליהם חלות החסימות. רק חשבון רגיל (לא מנהל) יכול להיות חשבון יעד – כל הכלים כאן עמידים בפני משתמש רגיל, לא בפני מנהל."));
+    sp.Children.Add(Para("בחר את החשבונות שעליהם חלות החסימות. אפשר לבחור גם חשבון מנהל – כולל החשבון שאתה מחובר אליו עכשיו."));
+    sp.Children.Add(Card(
+      Para("⚠ חשבון מנהל: החסימות יחולו עליו, אבל מנהל תמיד יכול לבטל אותן (לכבות שירותים, למחוק כללים, לערוך את הרישום). זה מקשה מאוד – לא בלתי אפשרי.", Warn),
+      Small($"התוכנה עצמה תמיד נשארת פתוחה גם לחשבון חסום: היא מותקנת ב-{Install.Dir} – תיקייה שמותרת תמיד – ופעולות הרקע שלה רצות דרך המערכת (SYSTEM), כך שחסימת PowerShell לא פוגעת בה.")));
     var card = Card(H2("חשבונות במחשב", "\uE716"));
     var inner = (StackPanel)card.Child;
     var me = Users.CurrentSid();
     if (UsersList.Count == 0) inner.Children.Add(Para("לא נמצאו חשבונות מקומיים.", Warn));
     foreach (var u in UsersList)
     {
-      bool selectable = !u.IsAdmin && u.Sid != me;
-      string? desc = u.IsAdmin ? "מנהל – לא ניתן לבחירה" : u.Sid == me ? "החשבון הנוכחי" : !u.HasProfile ? "עוד לא התחבר: יש להתחבר אליו פעם אחת לפני החלת חסימות המשתמש" : "חשבון רגיל";
+      string desc = (u.IsAdmin ? "מנהל" : "חשבון רגיל") + (u.Sid == me ? " · החשבון שאתה מחובר אליו עכשיו" : "") +
+                    (!u.HasProfile ? " · עוד לא התחבר: יש להתחבר אליו פעם אחת לפני החלת חסימות המשתמש" : "");
       var sid = u.Sid;
       inner.Children.Add(Toggle(u.Name, desc, Cfg.TargetSids.Contains(sid), on =>
       {
         Cfg.TargetSids.Remove(sid);
         if (on) Cfg.TargetSids.Add(sid);
-      }, selectable));
+      }));
     }
     inner.Children.Add(Btn("רענן רשימה", () => { UsersList = Users.List(); Refresh(); }));
     sp.Children.Add(card);

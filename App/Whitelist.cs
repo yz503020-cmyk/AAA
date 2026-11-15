@@ -23,6 +23,8 @@ static class Whitelist
   /// <summary>תיקיות מערכת מחוץ ל-Windows שתמיד מותרות (אבטחת Windows, מקלדת מגע, WebView2)</summary>
   public static readonly string[] BaselineAllowed =
   {
+    // התוכנה עצמה – תמיד מותרת, כדי שאפשר יהיה להיכנס ול"ביטול הכל" גם כשחשבון היעד הוא מנהל
+    @"%PROGRAMFILES%\AAA\*",
     @"%PROGRAMFILES%\Windows Defender\*", @"%PROGRAMFILES%\Windows Security\*",
     @"%PROGRAMFILES%\Common Files\microsoft shared\ink\*", @"%PROGRAMFILES%\Windows Photo Viewer\*",
     @"%OSDRIVE%\ProgramData\Microsoft\Windows Defender\Platform\*",

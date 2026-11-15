@@ -15,6 +15,7 @@ public partial class MainWindow : Window
   readonly Button _apply;
   bool _dirty;
   bool _busy;
+  bool _adminWarned;
   int _sel;
   string _glyph = "";
 
@@ -286,8 +287,16 @@ public partial class MainWindow : Window
   {
     if (Cfg.TargetSids.Count == 0 && (Cfg.Policies.Any(id => PolicyCatalog.All.FirstOrDefault(p => p.Id == id)?.UserScoped == true) || Cfg.WatchdogEnabled || Cfg.DenyTools.Count > 0))
       if (!Confirm("לא נבחר חשבון יעד: חסימות המשתמש, הוואצ'דוג והכלים החסומים לא יחולו על אף אחד. להמשיך?")) return;
-    if (Cfg.TargetSids.Contains(Users.CurrentSid()))
-    { Say("החשבון שאתה מחובר אליו כעת מסומן כחשבון יעד. הסר אותו ברשימת חשבונות היעד."); return; }
+    var adminTargets = UsersList.Where(u => u.IsAdmin && Cfg.TargetSids.Contains(u.Sid)).Select(u => u.Name).ToList();
+    if (adminTargets.Count > 0 && !_adminWarned)
+    {
+      bool meToo = Cfg.TargetSids.Contains(Users.CurrentSid());
+      if (!Confirm($"חשבונות מנהל מסומנים כחשבון יעד: {string.Join(", ", adminTargets)}" + (meToo ? "\n(כולל החשבון שאתה מחובר אליו עכשיו)" : "") +
+        $"\n\nהחסימות יחולו עליהם. התוכנה עצמה תישאר פתוחה תמיד מ-{Install.Dir} (קיצור דרך בתפריט התחל ובשולחן העבודה), כך שתמיד אפשר לחזור ול\"ביטול הכל\".\n\nלהמשיך?")) return;
+      _adminWarned = true;
+    }
+    if (!Install.IsRunningInstalled() && Cfg.TargetSids.Contains(Users.CurrentSid()))
+    { Say($"החשבון שלך מסומן כחשבון יעד, אבל התוכנה לא רצה מתיקיית ההתקנה ({Install.Exe}). סגור ופתח אותה משם, ואז החל שוב."); return; }
     if (Cfg.AppLockerEnabled && !Cfg.AppLockerAuditOnly && !Cfg.AllowProgramFiles && Cfg.Allowed.Count == 0)
       if (!Confirm("AppLocker במצב אכיפה בלי שום תוכנה מורשית: משתמש היעד יוכל להריץ רק את Windows עצמו. להמשיך?")) return;
 

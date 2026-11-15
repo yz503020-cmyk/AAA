@@ -43,6 +43,19 @@ static class AppLocker
   static IEnumerable<string> PfExceptions(Config cfg) =>
     ProgramFilesScan.Unwanted.Concat(cfg.PfWritable.Select(w => w.TrimEnd('\\') + "\\*")).Distinct(StringComparer.OrdinalIgnoreCase);
 
+  /// <summary>
+  /// למי ניתן "הכל מותר": כל חשבון מנהל שאינו חשבון יעד – לפי ה-SID האישי שלו (חל גם כשהמנהל עובד בלי "הפעל כמנהל").
+  /// קבוצת המנהלים כולה מקבלת היתר רק אם אף מנהל לא נבחר כחשבון יעד.
+  /// </summary>
+  internal static List<string> AdminRuleSids(Config cfg)
+  {
+    var targets = new HashSet<string>(cfg.TargetSids, StringComparer.OrdinalIgnoreCase);
+    var adminSids = Users.AdminSids();
+    var list = adminSids.Where(s => !targets.Contains(s)).ToList();
+    if (!targets.Any(adminSids.Contains)) list.Insert(0, Admins);
+    return list.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+  }
+
   public static string BuildXml(Config cfg)
   {
     string mode = cfg.AppLockerAuditOnly ? "AuditOnly" : "Enabled";
@@ -50,6 +63,7 @@ static class AppLocker
       .Concat(cfg.Allowed.Where(a => !a.IsPublisher).Select(a => a.IsFolder ? a.Path.TrimEnd('\\') + "\\*" : a.Path))
       .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     var targets = cfg.TargetSids.ToList();
+    var admins = AdminRuleSids(cfg);
     var deny = Whitelist.DenyTools.Where(t => cfg.DenyTools.Contains(t.Id)).SelectMany(t => t.Paths).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     var sb = new StringBuilder();
@@ -57,7 +71,7 @@ static class AppLocker
 
     // ---- קובצי הפעלה ----
     sb.Append($"<RuleCollection Type=\"Exe\" EnforcementMode=\"{mode}\">");
-    sb.Append(PathRule("AAA: מנהלים – הכל", Admins, "Allow", "*"));
+    foreach (var a in admins) sb.Append(PathRule("AAA: מנהל – הכל", a, "Allow", "*"));
     sb.Append(PathRule("AAA: תיקיית Windows", Everyone, "Allow", "%WINDIR%\\*", Whitelist.WindowsWritableExceptions));
     foreach (var p in allowPaths) sb.Append(PathRule("AAA: " + p, Everyone, "Allow", p));
     if (cfg.AllowProgramFiles) sb.Append(PathRule("AAA: Program Files (מצב רגיל)", Everyone, "Allow", "%PROGRAMFILES%\\*", PfExceptions(cfg)));
@@ -69,13 +83,13 @@ static class AppLocker
 
     // ---- קובצי התקנה (MSI) – רק מנהלים ----
     sb.Append($"<RuleCollection Type=\"Msi\" EnforcementMode=\"{mode}\">");
-    sb.Append(PathRule("AAA: מנהלים – MSI", Admins, "Allow", "*"));
+    foreach (var a in admins) sb.Append(PathRule("AAA: מנהל – MSI", a, "Allow", "*"));
     sb.Append(PathRule("AAA: Windows Installer", Everyone, "Allow", "%WINDIR%\\Installer\\*"));
     sb.Append("</RuleCollection>");
 
     // ---- סקריפטים (ps1, bat, cmd, vbs, js) ----
     sb.Append($"<RuleCollection Type=\"Script\" EnforcementMode=\"{mode}\">");
-    sb.Append(PathRule("AAA: מנהלים – סקריפטים", Admins, "Allow", "*"));
+    foreach (var a in admins) sb.Append(PathRule("AAA: מנהל – סקריפטים", a, "Allow", "*"));
     sb.Append(PathRule("AAA: סקריפטים של Windows", Everyone, "Allow", "%WINDIR%\\*", Whitelist.WindowsWritableExceptions));
     foreach (var p in allowPaths) sb.Append(PathRule("AAA: " + p, Everyone, "Allow", p));
     if (cfg.AllowProgramFiles) sb.Append(PathRule("AAA: סקריפטים ב-Program Files", Everyone, "Allow", "%PROGRAMFILES%\\*", PfExceptions(cfg)));
@@ -87,7 +101,7 @@ static class AppLocker
       sb.Append(PublisherRule("AAA: כל האפליקציות החתומות", Everyone, "*", "*"));
     else
     {
-      sb.Append(PublisherRule("AAA: מנהלים – כל האפליקציות", Admins, "*", "*"));
+      foreach (var a in admins) sb.Append(PublisherRule("AAA: מנהל – כל האפליקציות", a, "*", "*"));
       sb.Append(PublisherRule("AAA: רכיבי Windows", Everyone, "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", "*"));
       foreach (var pkg in cfg.AllowedPackages)
         sb.Append(PublisherRule("AAA: " + pkg, Everyone, "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US", pkg.TrimEnd('_')));

@@ -88,8 +88,58 @@ static class Shell
   {
     // פלט ב-UTF8 כדי ששמות בעברית יגיעו תקינים
     var full = "[Console]::OutputEncoding=[Text.Encoding]::UTF8;$ProgressPreference='SilentlyContinue';" + script;
+    // אם החשבון הנוכחי הוא חשבון יעד (מנהל שנחסם) – PowerShell עלול להיות חסום לו. מריצים דרך SYSTEM, שהחסימות לא חלות עליו.
+    if (CurrentIsTarget()) return PowerShellAsSystem(full, timeoutMs);
     var enc = Convert.ToBase64String(Encoding.Unicode.GetBytes(full));
     return Run(Sys32(@"WindowsPowerShell\v1.0\powershell.exe"), "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + enc, timeoutMs);
+  }
+
+  static bool CurrentIsTarget()
+  {
+    try
+    {
+      var me = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value ?? "";
+      return Config.Load().TargetSids.Contains(me, StringComparer.OrdinalIgnoreCase);
+    }
+    catch { return false; }
+  }
+
+  /// <summary>
+  /// מריץ סקריפט PowerShell כ-SYSTEM דרך משימה מתוזמנת זמנית (schtasks).
+  /// AppLocker לא חל על תהליכי מערכת, והוואצ'דוג לא בודק את סשן 0 – לכן זה עובד גם כשהמנהל עצמו חסום.
+  /// </summary>
+  public static Result PowerShellAsSystem(string script, int timeoutMs = 300_000)
+  {
+    AppPaths.EnsureRoot();
+    var dir = Path.Combine(AppPaths.Root, "run");
+    Directory.CreateDirectory(dir);
+    var id = Guid.NewGuid().ToString("N")[..12];
+    var ps1 = Path.Combine(dir, id + ".ps1");
+    var outf = Path.Combine(dir, id + ".out");
+    var done = Path.Combine(dir, id + ".done");
+    var wrapped = "try { & {\r\n" + script + "\r\n} *>&1 | Out-File -FilePath '" + outf.Replace("'", "''") + "' -Encoding utf8 -Width 4096 } " +
+                  "catch { $_ | Out-File -FilePath '" + outf.Replace("'", "''") + "' -Append -Encoding utf8 } " +
+                  "finally { Set-Content -Path '" + done.Replace("'", "''") + "' -Value 1 }";
+    File.WriteAllText(ps1, wrapped, new UTF8Encoding(true));
+    var task = "AAA_run_" + id;
+    var tr = $"\"{Sys32(@"WindowsPowerShell\v1.0\powershell.exe")}\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"{ps1}\"";
+    try
+    {
+      var c = Exe("schtasks.exe", $"/Create /TN \"{task}\" /SC ONCE /ST 00:00 /RU SYSTEM /RL HIGHEST /F /TR \"{tr.Replace("\"", "\\\"")}\"");
+      if (c.Exit != 0) return new Result(-1, "יצירת משימת מערכת נכשלה: " + c.Output);
+      Exe("schtasks.exe", $"/Run /TN \"{task}\"");
+      var sw = Stopwatch.StartNew();
+      while (!File.Exists(done) && sw.ElapsedMilliseconds < timeoutMs) Thread.Sleep(300);
+      if (!File.Exists(done)) return new Result(-1, "timeout");
+      Thread.Sleep(200);
+      var text = File.Exists(outf) ? File.ReadAllText(outf, Encoding.UTF8) : "";
+      return new Result(0, text);
+    }
+    finally
+    {
+      Exe("schtasks.exe", $"/Delete /TN \"{task}\" /F");
+      foreach (var f in new[] { ps1, outf, done }) { try { File.Delete(f); } catch { } }
+    }
   }
 
   public static Result Exe(string sys32Exe, string args, int timeoutMs = 120_000) => Run(Sys32(sys32Exe), args, timeoutMs);
